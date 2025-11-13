@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "Smartleaf",
+    "slug": "Smartleaf",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/SLfinalLogo.png",
+    "scheme": "smartleaf",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "assets/**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/SLfinalLogo.png",
+        "backgroundImage": "./assets/images/SLfinalLogo.png",
+        "monochromeImage": "./assets/images/SLfinalLogo.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/SLfinalLogo.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/SLfinalLogo.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}
