@@ -219,26 +219,14 @@ export default function HomeScreen() {
       const imgBuffer = Uint8Array.from(atob(imgB64), (c) => c.charCodeAt(0));
       let imageTensor = decodeJpeg(imgBuffer);
 
-      const [height, width] = imageTensor.shape;
-
       const targetSize = 224;
 
-      const scale = targetSize / Math.max(width as number, height as number);
-      const newWidth = Math.round((width as number) * scale);
-      const newHeight = Math.round((height as number) * scale);
-
-      imageTensor = tf.image.resizeBilinear(imageTensor as tf.Tensor3D, [newHeight, newWidth]);
-
-      const top = Math.floor((targetSize - newHeight) / 2);
-      const bottom = targetSize - newHeight - top;
-      const left = Math.floor((targetSize - newWidth) / 2);
-      const right = targetSize - newWidth - left;
-
-      imageTensor = tf.pad(imageTensor as tf.Tensor3D, [
-        [top, bottom],
-        [left, right],
-        [0, 0],
-      ], );
+      // Simple direct resize to 224x224 - let model handle the full image
+      imageTensor = tf.image.resizeBilinear(
+        imageTensor as tf.Tensor3D, 
+        [targetSize, targetSize],
+        true // alignCorners for better quality
+      );
 
       const tensor = (imageTensor as tf.Tensor3D)
         .toFloat()
@@ -250,64 +238,6 @@ export default function HomeScreen() {
       console.error("Error in image preprocessing:", error);
       throw error;
     }
-  };
-
-  const enhanceImageQuality = async (imageTensor: tf.Tensor3D): Promise<tf.Tensor3D> => {
-    return tf.tidy(() => {
-      let enhanced = imageTensor.toFloat();
-      
-      enhanced = enhanceContrast(enhanced) as tf.Tensor3D;
-      
-      enhanced = applySharpening(enhanced) as tf.Tensor3D;
-      
-      return enhanced.clipByValue(0, 255).cast('int32') as tf.Tensor3D;
-    });
-  };
-
-  const enhanceContrast = (tensor: tf.Tensor): tf.Tensor => {
-    return tf.tidy(() => {
-      const mean = tensor.mean();
-      const std = tensor.sub(mean).square().mean().sqrt();
-      
-      const enhanced = tensor.sub(mean).div(std.add(1e-7)).mul(std);
-      
-      return enhanced.add(mean).clipByValue(0, 255);
-    });
-  };
-
-  const applySharpening = (tensor: tf.Tensor): tf.Tensor => {
-    return tf.tidy(() => {
-      const [height, width, channels] = tensor.shape as [number, number, number];
-      
-      const kernel = tf.tensor2d([
-        [-1, -1, -1],
-        [-1,  9, -1],
-        [-1, -1, -1]
-      ], [3, 3], 'float32');
-      
-      const sharpenedChannels: tf.Tensor2D[] = [];
-      
-      for (let i = 0; i < channels; i++) {
-        const channel = tensor.slice([0, 0, i], [height, width, 1]);
-        const channel2D = channel.reshape([height, width]);
-        
-        const expanded = channel2D.expandDims(0).expandDims(-1) as tf.Tensor4D;
-        
-        const kernelReshaped = kernel.reshape([3, 3, 1, 1]) as tf.Tensor4D;
-        
-        const sharpened = tf.conv2d(
-          expanded,
-          kernelReshaped,
-          1,
-          'same'
-        );
-        
-        const squeezed = sharpened.squeeze([0, 3]) as tf.Tensor2D;
-        sharpenedChannels.push(squeezed);
-      }
-      
-      return tf.stack(sharpenedChannels, 2).cast('float32');
-    });
   };
 
   const analyzeImage = async () => {
@@ -378,7 +308,7 @@ export default function HomeScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 0.7,  
+        quality: 1.0, // Max quality
         exif: false, 
       });
 
@@ -399,8 +329,8 @@ export default function HomeScreen() {
     try {
       if (cameraRef.current) {
         const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.7, 
-          skipProcessing: true, 
+          quality: 1.0, // Max quality
+          skipProcessing: false, 
           exif: false,
           imageType: 'jpg', 
         });
@@ -434,11 +364,15 @@ export default function HomeScreen() {
       <View style={styles.cameraContainer}>
         {capturedImage ? (
           <View style={styles.previewContainer}>
-            <Image source={{ uri: capturedImage }} style={styles.preview} />
+            <Image 
+              source={{ uri: capturedImage }} 
+              style={styles.preview}
+              resizeMode="contain"
+            />
             <View style={styles.imageQualityTip}>
               <Ionicons name="information-circle" size={16} color="#fff" />
               <Text style={styles.qualityTipText}>
-                Ensure leaf is clear and well-lit for best results
+                Full image shown - tap Analyze to diagnose
               </Text>
             </View>
           </View>
@@ -555,7 +489,7 @@ const styles = StyleSheet.create({
     margin: 20,
     borderRadius: 20,
     overflow: "hidden",
-    backgroundColor: "#e0e0e0",
+    backgroundColor: "#000",
   },
   camera: {
     flex: 1,
@@ -587,9 +521,11 @@ const styles = StyleSheet.create({
   previewContainer: {
     flex: 1,
     position: 'relative',
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   preview: {
-    flex: 1,
     width: "100%",
     height: "100%",
   },
