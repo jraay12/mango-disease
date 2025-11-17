@@ -24,17 +24,14 @@ export default function HomeScreen() {
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
-  // API Configuration - Update with your computer's IP for local testing
   const API_URL = "http://192.168.1.97:8000/predict"; // ← CHANGE THIS to your computer's IP
 
-  // Request camera permissions on mount
   React.useEffect(() => {
     if (Platform.OS !== "web") {
       requestPermission();
     }
   }, []);
 
-  // Handle image upload from gallery
   const handleUploadImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -53,7 +50,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle capture photo
   const handleCapturePhoto = async () => {
     if (Platform.OS === "web") {
       Alert.alert(
@@ -68,7 +64,7 @@ export default function HomeScreen() {
         const photo = await cameraRef.current.takePictureAsync();
         if (photo) {
           setCapturedImage(photo.uri);
-          setAnalysisResult(null); // Clear previous results
+          setAnalysisResult(null); 
         }
       }
     } catch (error) {
@@ -106,7 +102,6 @@ export default function HomeScreen() {
         setAnalysisResult(result);
         console.log("Analysis successful:", result);
 
-        // Navigate to Prescription tab with parameters
         router.push({
           pathname: "/(tabs)/prscptn_tab",
           params: {
@@ -127,23 +122,19 @@ export default function HomeScreen() {
     }
   };
 
-  // Retake photo
   const handleRetake = () => {
     setCapturedImage(null);
     setAnalysisResult(null);
   };
 
-  // Get confidence color
   const getConfidenceColor = (confidence: any) => {
     if (confidence > 0.8) return "#4CAF50";
     if (confidence > 0.6) return "#FF9800";
     return "#F44336";
   };
 
-  // Check if running on web
   const isWeb = Platform.OS === "web";
 
-  // Loading state
   if (!isWeb && !permission) {
     return (
       <LinearGradient
@@ -155,7 +146,6 @@ export default function HomeScreen() {
     );
   }
 
-  // Permission denied
   if (!isWeb && permission && !permission.granted) {
     return (
       <LinearGradient
@@ -297,12 +287,10 @@ export default function HomeScreen() {
         </View>
       )}
 
-      {/* Detailed Results */}
       {analysisResult && (
         <View style={styles.detailedResults}>
           <Text style={styles.resultsTitle}>Detailed Analysis</Text>
 
-          {/* Top Predictions */}
           <View style={styles.predictionsList}>
             {Object.entries(analysisResult.all_predictions)
               .sort(([, a], [, b]) => b - a)
@@ -325,7 +313,6 @@ export default function HomeScreen() {
               ))}
           </View>
 
-          {/* Health Recommendation */}
           <View style={styles.recommendationCard}>
             <Text style={styles.recommendationTitle}>
               {analysisResult.disease === "Healthy"
@@ -338,15 +325,6 @@ export default function HomeScreen() {
                 : "Consider consulting with agricultural experts for proper treatment."}
             </Text>
           </View>
-        </View>
-      )}
-
-      {/* API Configuration Hint */}
-      {!analysisResult && capturedImage && (
-        <View style={styles.configHint}>
-          <Text style={styles.configHintText}>
-            💡 Make sure your Python backend is running on {API_URL}
-          </Text>
         </View>
       )}
     </LinearGradient>
