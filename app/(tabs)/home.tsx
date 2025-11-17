@@ -1,13 +1,9 @@
 import { Ionicons } from "@expo/vector-icons";
-import * as tf from "@tensorflow/tfjs";
-import "@tensorflow/tfjs-react-native";
-import { bundleResourceIO, decodeJpeg } from "@tensorflow/tfjs-react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,433 +19,334 @@ export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [facing, setFacing] = useState<"back" | "front">("back");
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [isModelLoading, setIsModelLoading] = useState(true);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
-  const classNames = [
-    "Anthracnose",
-    "Bacterial Canker",
-    "Cutting Weevil",
-    "Die Back",
-    "Gall Midge",
-    "Healthy",
-    "Powdery Mildew",
-    "Sooty Mould",
-  ];
+  // API Configuration - Update with your computer's IP for local testing
+  const API_URL = "http://192.168.1.97:8000/predict"; // ← CHANGE THIS to your computer's IP
 
-  class L2 {
-    static readonly className = "L2";
-    private l2: number;
-
-    constructor(config?: any) {
-      if (config) {
-        this.l2 = config.l2 !== undefined ? config.l2 : config.l !== undefined ? config.l : 0.01;
-      } else {
-        this.l2 = 0.01;
-      }
+  // Request camera permissions on mount
+  React.useEffect(() => {
+    if (Platform.OS !== "web") {
+      requestPermission();
     }
-
-    apply(x: tf.Tensor): tf.Scalar {
-      return tf.tidy(() => {
-        return tf.mul(this.l2, tf.sum(tf.square(x))) as tf.Scalar;
-      });
-    }
-
-    getConfig() {
-      return { l2: this.l2 };
-    }
-
-    static fromConfig(cls: any, config: any) {
-      return new cls(config);
-    }
-  }
-
-  tf.serialization.registerClass(L2);
-
-  class Normalization extends tf.layers.Layer {
-    static readonly className = "Normalization";
-    mean: tf.LayerVariable;
-    variance: tf.LayerVariable;
-    count: tf.LayerVariable;
-
-    constructor(config: any) {
-      super(config);
-      
-      const meanArray = config.mean || [0, 0, 0];
-      const varianceArray = config.variance || [1, 1, 1];
-      const countValue = config.count || 1;
-      
-      const flatMean = Array.isArray(meanArray[0]) ? meanArray.flat() : meanArray;
-      const flatVariance = Array.isArray(varianceArray[0]) ? varianceArray.flat() : varianceArray;
-      
-      const meanShape = [flatMean.length];
-      const varianceShape = [flatVariance.length];
-      
-      const meanTensor = tf.tensor1d(flatMean, 'float32');
-      const varianceTensor = tf.tensor1d(flatVariance, 'float32');
-      const countTensor = tf.scalar(countValue, 'float32'); 
-      
-      this.mean = this.addWeight(
-        'mean',
-        meanShape,
-        'float32',
-        tf.initializers.zeros(),
-        undefined,
-        false 
-      );
-      
-      this.variance = this.addWeight(
-        'variance',
-        varianceShape,
-        'float32',
-        tf.initializers.zeros(),
-        undefined,
-        false 
-      );
-      
-      this.count = this.addWeight(
-        'count',
-        [],
-        'float32', 
-        tf.initializers.zeros(),
-        undefined,
-        false 
-      );
-      
-      this.mean.write(meanTensor);
-      this.variance.write(varianceTensor);
-      this.count.write(countTensor);
-      
-      meanTensor.dispose();
-      varianceTensor.dispose();
-      countTensor.dispose();
-    }
-
-    call(inputs: tf.Tensor | tf.Tensor[]) {
-      return tf.tidy(() => {
-        const input = Array.isArray(inputs) ? inputs[0] : inputs;
-        const meanTensor = this.mean.read();
-        const varianceTensor = this.variance.read();
-        
-        return input
-          .sub(meanTensor)
-          .div(varianceTensor.sqrt().add(tf.scalar(1e-7)));
-      });
-    }
-
-    getConfig() {
-      const config = super.getConfig();
-      return {
-        ...config,
-        mean: this.mean.read().arraySync(),
-        variance: this.variance.read().arraySync(),
-        count: this.count.read().arraySync(),
-      };
-    }
-
-    static fromConfig(cls: any, config: any) {
-      return new cls(config);
-    }
-  }
-
-  tf.serialization.registerClass(Normalization);
-
-  useEffect(() => {
-    const initTensorFlow = async () => {
-      try {
-        await tf.ready();
-        console.log("TensorFlow.js initialized");
-
-        const modelJson = require("../../assets/models/model.json");
-        const modelWeights = [
-          require("../../assets/models/group1-shard1of19.bin"),
-          require("../../assets/models/group1-shard2of19.bin"),
-          require("../../assets/models/group1-shard3of19.bin"),
-          require("../../assets/models/group1-shard4of19.bin"),
-          require("../../assets/models/group1-shard5of19.bin"),
-          require("../../assets/models/group1-shard6of19.bin"),
-          require("../../assets/models/group1-shard7of19.bin"),
-          require("../../assets/models/group1-shard8of19.bin"),
-          require("../../assets/models/group1-shard9of19.bin"),
-          require("../../assets/models/group1-shard10of19.bin"),
-          require("../../assets/models/group1-shard11of19.bin"),
-          require("../../assets/models/group1-shard12of19.bin"),
-          require("../../assets/models/group1-shard13of19.bin"),
-          require("../../assets/models/group1-shard14of19.bin"),
-          require("../../assets/models/group1-shard15of19.bin"),
-          require("../../assets/models/group1-shard16of19.bin"),
-          require("../../assets/models/group1-shard17of19.bin"),
-          require("../../assets/models/group1-shard18of19.bin"),
-          require("../../assets/models/group1-shard19of19.bin"),
-        ];
-
-        const loadedModel = await tf.loadLayersModel(
-          bundleResourceIO(modelJson, modelWeights)
-        );
-
-        setModel(loadedModel);
-        setIsModelLoading(false);
-        console.log("Model loaded successfully");
-      } catch (error) {
-        console.error("Error loading model:", error);
-        Alert.alert(
-          "Model Loading Error",
-          `Failed to load AI model.\n\nError: ${(error as Error).message}`
-        );
-        setIsModelLoading(false);
-      }
-    };
-
-    initTensorFlow();
   }, []);
 
-  useEffect(() => {
-    if (Platform.OS !== "web") requestPermission();
-  }, []);
-
-  const imageToTensor = async (imageUri: string) => {
-    try {
-      const imgB64 = await FileSystem.readAsStringAsync(imageUri, {
-        encoding: "base64",
-      });
-
-      const imgBuffer = Uint8Array.from(atob(imgB64), (c) => c.charCodeAt(0));
-      let imageTensor = decodeJpeg(imgBuffer);
-
-      const targetSize = 224;
-
-      // Simple direct resize to 224x224 - let model handle the full image
-      imageTensor = tf.image.resizeBilinear(
-        imageTensor as tf.Tensor3D, 
-        [targetSize, targetSize],
-        true // alignCorners for better quality
-      );
-
-      const tensor = (imageTensor as tf.Tensor3D)
-        .toFloat()
-        .div(tf.scalar(255.0)) 
-        .expandDims(0);
-
-      return tensor as tf.Tensor4D;
-    } catch (error) {
-      console.error("Error in image preprocessing:", error);
-      throw error;
-    }
-  };
-
-  const analyzeImage = async () => {
-    if (!model || !capturedImage) {
-      Alert.alert("Error", "Model not loaded or no image captured");
-      return;
-    }
-
-    setIsAnalyzing(true);
-
-    try {
-      const tensor = await imageToTensor(capturedImage);
-      const prediction = model.predict(tensor) as tf.Tensor;
-      const predictionData = await prediction.data();
-      
-      const predictionArray = Array.from(predictionData);
-      const sum = predictionArray.reduce((a, b) => a + b, 0);
-      
-      const normalizedPredictions = sum !== 1 ? 
-        predictionArray.map(p => p / sum) : predictionArray;
-      
-      const maxIndex = normalizedPredictions.indexOf(
-        Math.max(...normalizedPredictions)
-      );
-      const confidence = normalizedPredictions[maxIndex] * 100;
-
-      const confidenceThreshold = 50; 
-      
-      tensor.dispose();
-      prediction.dispose();
-
-      if (confidence < confidenceThreshold) {
-        Alert.alert(
-          "Low Confidence", 
-          `The AI is not confident in its prediction (${confidence.toFixed(1)}%).\n\nPlease try with a clearer image of the mango leaf.`,
-          [{ text: "OK", onPress: () => setIsAnalyzing(false) }]
-        );
-        return;
-      }
-
-      router.push({
-        pathname: "/(tabs)/prscptn_tab",
-        params: {
-          imageUri: capturedImage,
-          prediction: classNames[maxIndex],
-          confidence: confidence.toFixed(2),
-          allPredictions: JSON.stringify(
-            classNames.map((name, i) => ({
-              name,
-              confidence: (normalizedPredictions[i] * 100).toFixed(2),
-            }))
-          ),
-        },
-      });
-    } catch (error) {
-      console.error("Error analyzing image:", error);
-      Alert.alert(
-        "Analysis Error", 
-        "Failed to analyze image. Please ensure the image is clear and try again."
-      );
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
+  // Handle image upload from gallery
   const handleUploadImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 1.0, // Max quality
-        exif: false, 
+        aspect: [4, 3],
+        quality: 1,
       });
 
       if (!result.canceled) {
         setCapturedImage(result.assets[0].uri);
+        setAnalysisResult(null); // Clear previous results
       }
     } catch (error) {
       Alert.alert("Error", "Failed to pick image");
     }
   };
 
+  // Handle capture photo
   const handleCapturePhoto = async () => {
     if (Platform.OS === "web") {
-      Alert.alert("Camera Not Available", "Camera is only available on mobile devices.");
+      Alert.alert(
+        "Camera Not Available",
+        "Camera is only available on mobile devices."
+      );
       return;
     }
 
     try {
       if (cameraRef.current) {
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 1.0, // Max quality
-          skipProcessing: false, 
-          exif: false,
-          imageType: 'jpg', 
-        });
-        if (photo) setCapturedImage(photo.uri);
+        const photo = await cameraRef.current.takePictureAsync();
+        if (photo) {
+          setCapturedImage(photo.uri);
+          setAnalysisResult(null); // Clear previous results
+        }
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to capture photo. Please ensure good lighting.");
+      Alert.alert("Error", "Failed to capture photo");
     }
   };
 
+  const analyzeImage = async () => {
+    if (!capturedImage) return;
+
+    setAnalyzing(true);
+    setAnalysisResult(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", {
+        uri: capturedImage,
+        type: "image/jpeg",
+        name: "mango_leaf.jpg",
+      } as any);
+
+      const response = await fetch(API_URL, {
+        method: "POST",
+        body: formData,
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+      const result = await response.json();
+
+      if (result.success) {
+        setAnalysisResult(result);
+        console.log("Analysis successful:", result);
+
+        // Navigate to Prescription tab with parameters
+        router.push({
+          pathname: "/(tabs)/prscptn_tab",
+          params: {
+            imageUri: capturedImage,
+            prediction: result.disease,
+            confidence: result.confidence.toString(),
+            allPredictions: JSON.stringify(result.all_predictions),
+          },
+        });
+      } else {
+        throw new Error(result.error || "Analysis failed");
+      }
+    } catch (error: any) {
+      console.error("Analysis error:", error);
+      Alert.alert("Analysis Failed", `Error: ${error.message}`);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Retake photo
+  const handleRetake = () => {
+    setCapturedImage(null);
+    setAnalysisResult(null);
+  };
+
+  // Get confidence color
+  const getConfidenceColor = (confidence: any) => {
+    if (confidence > 0.8) return "#4CAF50";
+    if (confidence > 0.6) return "#FF9800";
+    return "#F44336";
+  };
+
+  // Check if running on web
   const isWeb = Platform.OS === "web";
 
-  if (isModelLoading) {
+  // Loading state
+  if (!isWeb && !permission) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4ade80" />
-        <Text style={styles.loadingText}>Loading AI Model...</Text>
-      </View>
+      <LinearGradient
+        colors={["#D5F4DF", "#68952A"]}
+        style={styles.loadingContainer}
+      >
+        <Text style={styles.loadingText}>Loading camera...</Text>
+      </LinearGradient>
+    );
+  }
+
+  // Permission denied
+  if (!isWeb && permission && !permission.granted) {
+    return (
+      <LinearGradient
+        colors={["#D5F4DF", "#68952A"]}
+        style={styles.permissionContainer}
+      >
+        <Ionicons name="camera-outline" size={80} color="#ccc" />
+        <Text style={styles.permissionText}>Camera permission is required</Text>
+        <TouchableOpacity
+          style={styles.permissionButton}
+          onPress={requestPermission}
+        >
+          <Text style={styles.permissionButtonText}>Grant Permission</Text>
+        </TouchableOpacity>
+      </LinearGradient>
     );
   }
 
   return (
     <LinearGradient colors={["#D5F4DF", "#68952A"]} style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="home-outline" size={30} color="#000" />
+        </TouchableOpacity>
+
         <Text style={styles.headerTitle}>SmartLeaf</Text>
+
         <TouchableOpacity onPress={() => router.push("/(tabs)/menu")}>
           <Ionicons name="menu" size={35} color="#000" />
         </TouchableOpacity>
       </View>
 
+      {/* Camera View or Preview */}
       <View style={styles.cameraContainer}>
         {capturedImage ? (
           <View style={styles.previewContainer}>
-            <Image 
-              source={{ uri: capturedImage }} 
-              style={styles.preview}
-              resizeMode="contain"
-            />
-            <View style={styles.imageQualityTip}>
-              <Ionicons name="information-circle" size={16} color="#fff" />
-              <Text style={styles.qualityTipText}>
-                Full image shown - tap Analyze to diagnose
-              </Text>
-            </View>
+            <Image source={{ uri: capturedImage }} style={styles.preview} />
+
+            {/* Analysis Results Overlay */}
+            {analysisResult && (
+              <View style={styles.resultsOverlay}>
+                <View
+                  style={[
+                    styles.resultCard,
+                    {
+                      backgroundColor: getConfidenceColor(
+                        analysisResult.confidence
+                      ),
+                    },
+                  ]}
+                >
+                  <Text style={styles.resultDisease}>
+                    {analysisResult.disease}
+                  </Text>
+                  <Text style={styles.resultConfidence}>
+                    {(analysisResult.confidence * 100).toFixed(1)}% confidence
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
         ) : isWeb ? (
           <View style={styles.webPlaceholder}>
-            <Ionicons name="camera-outline" size={80} color="#999" />
-            <Text style={styles.webPlaceholderText}>Camera Not Available</Text>
+            <Ionicons name="camera-outline" size={80} color="#a0a0a0" />
+            <Text style={styles.webPlaceholderText}>Camera Preview</Text>
             <Text style={styles.webPlaceholderSubtext}>
-              Camera preview is only available on mobile devices.{"\n"}
-              Please upload an image instead.
+              Camera is only available on mobile devices
             </Text>
-            <TouchableOpacity style={styles.uploadOnlyButton} onPress={handleUploadImage}>
-              <Ionicons name="cloud-upload-outline" size={24} color="#fff" />
+            <TouchableOpacity
+              style={styles.uploadOnlyButton}
+              onPress={handleUploadImage}
+            >
+              <Ionicons name="images-outline" size={24} color="#fff" />
               <Text style={styles.uploadOnlyButtonText}>Upload Image</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <CameraView 
-            style={styles.camera} 
-            facing={facing} 
-            ref={cameraRef}
-          >
-            <View style={styles.cameraOverlay}>
-              <View style={styles.focusFrame} />
-              <Text style={styles.cameraTip}>
-                Position mango leaf in frame with good lighting
-              </Text>
-            </View>
+          <CameraView style={styles.camera} facing={facing} ref={cameraRef}>
+            <View style={styles.cameraOverlay} />
           </CameraView>
         )}
       </View>
 
-      {!capturedImage && !isWeb && (
+      {/* Controls - Only show on mobile when no captured image */}
+      {!isWeb && !capturedImage && (
         <View style={styles.controls}>
-          <TouchableOpacity style={styles.controlButton} onPress={handleUploadImage}>
-            <Ionicons name="images-outline" size={30} color="#fff" />
-            <Text style={styles.controlButtonLabel}>Gallery</Text>
+          <TouchableOpacity
+            style={styles.controlButton}
+            onPress={handleUploadImage}
+          >
+            <Ionicons name="images-outline" size={28} color="#4ade80" />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.captureButton} onPress={handleCapturePhoto}>
+          <TouchableOpacity
+            style={styles.captureButton}
+            onPress={handleCapturePhoto}
+          >
             <View style={styles.captureButtonInner} />
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.controlButton}
-            onPress={() => setFacing(facing === "back" ? "front" : "back")}
+            onPress={() =>
+              setFacing((current) => (current === "back" ? "front" : "back"))
+            }
           >
-            <Ionicons name="camera-reverse-outline" size={30} color="#fff" />
-            <Text style={styles.controlButtonLabel}>Flip</Text>
+            <Ionicons name="camera-reverse-outline" size={28} color="#4ade80" />
           </TouchableOpacity>
         </View>
       )}
 
+      {/* Bottom Action - When image is captured */}
       {capturedImage && (
         <View style={styles.bottomAction}>
           <TouchableOpacity
             style={styles.retakeButton}
-            onPress={() => setCapturedImage(null)}
+            onPress={handleRetake}
+            disabled={analyzing}
           >
-            <Ionicons name="arrow-back" size={20} color="#4ade80" />
-            <Text style={styles.retakeText}>Retake</Text>
+            <Text style={[styles.retakeText, analyzing && styles.disabledText]}>
+              Retake
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.analyzeButton, isAnalyzing && styles.analyzeButtonDisabled]}
+            style={[styles.analyzeButton, analyzing && styles.analyzingButton]}
             onPress={analyzeImage}
-            disabled={isAnalyzing}
+            disabled={analyzing}
           >
-            {isAnalyzing ? (
-              <ActivityIndicator color="#fff" />
+            {analyzing ? (
+              <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <>
-                <Ionicons name="analytics" size={20} color="#fff" />
-                <Text style={styles.analyzeText}>Analyze Image</Text>
-              </>
+              <Text style={styles.analyzeText}>
+                {analysisResult ? "Re-analyze" : "Analyze"}
+              </Text>
             )}
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Detailed Results */}
+      {analysisResult && (
+        <View style={styles.detailedResults}>
+          <Text style={styles.resultsTitle}>Detailed Analysis</Text>
+
+          {/* Top Predictions */}
+          <View style={styles.predictionsList}>
+            {Object.entries(analysisResult.all_predictions)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 3)
+              .map(([disease, confidence], index) => (
+                <View
+                  key={disease}
+                  style={[
+                    styles.predictionItem,
+                    disease === analysisResult.disease && styles.topPrediction,
+                  ]}
+                >
+                  <Text style={styles.predictionName}>
+                    {index + 1}. {disease}
+                  </Text>
+                  <Text style={styles.predictionConfidence}>
+                    {(confidence * 100).toFixed(1)}%
+                  </Text>
+                </View>
+              ))}
+          </View>
+
+          {/* Health Recommendation */}
+          <View style={styles.recommendationCard}>
+            <Text style={styles.recommendationTitle}>
+              {analysisResult.disease === "Healthy"
+                ? "🌱 Healthy Plant"
+                : "⚠️ Treatment Recommended"}
+            </Text>
+            <Text style={styles.recommendationText}>
+              {analysisResult.disease === "Healthy"
+                ? "Your mango plant appears healthy! Continue regular care and monitoring."
+                : "Consider consulting with agricultural experts for proper treatment."}
+            </Text>
+          </View>
+        </View>
+      )}
+
+      {/* API Configuration Hint */}
+      {!analysisResult && capturedImage && (
+        <View style={styles.configHint}>
+          <Text style={styles.configHintText}>
+            💡 Make sure your Python backend is running on {API_URL}
+          </Text>
         </View>
       )}
     </LinearGradient>
@@ -468,7 +365,30 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     color: "#666",
-    marginTop: 10,
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 20,
+  },
+  permissionText: {
+    fontSize: 16,
+    color: "#6b7280",
+    marginTop: 20,
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  permissionButton: {
+    backgroundColor: "#4ade80",
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 10,
+  },
+  permissionButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
   },
   header: {
     flexDirection: "row",
@@ -489,7 +409,7 @@ const styles = StyleSheet.create({
     margin: 20,
     borderRadius: 20,
     overflow: "hidden",
-    backgroundColor: "#000",
+    backgroundColor: "#e0e0e0",
   },
   camera: {
     flex: 1,
@@ -497,54 +417,42 @@ const styles = StyleSheet.create({
   cameraOverlay: {
     flex: 1,
     backgroundColor: "transparent",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  focusFrame: {
-    width: 200,
-    height: 200,
-    borderWidth: 2,
-    borderColor: "#4ade80",
-    borderRadius: 10,
-    backgroundColor: "transparent",
-  },
-  cameraTip: {
-    position: "absolute",
-    bottom: 30,
-    color: "#fff",
-    fontSize: 14,
-    textAlign: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 10,
-    borderRadius: 8,
   },
   previewContainer: {
     flex: 1,
-    position: 'relative',
-    backgroundColor: '#000',
-    justifyContent: 'center',
-    alignItems: 'center',
+    position: "relative",
   },
   preview: {
+    flex: 1,
     width: "100%",
     height: "100%",
   },
-  imageQualityTip: {
+  resultsOverlay: {
     position: "absolute",
     top: 20,
     left: 20,
     right: 20,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.7)",
-    padding: 10,
-    borderRadius: 8,
   },
-  qualityTipText: {
+  resultCard: {
+    padding: 15,
+    borderRadius: 10,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  resultDisease: {
     color: "#fff",
-    fontSize: 12,
-    marginLeft: 8,
-    flex: 1,
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  resultConfidence: {
+    color: "#fff",
+    fontSize: 14,
+    marginTop: 5,
   },
   webPlaceholder: {
     flex: 1,
@@ -590,14 +498,10 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
   controlButton: {
+    width: 50,
+    height: 50,
+    justifyContent: "center",
     alignItems: "center",
-    padding: 10,
-  },
-  controlButtonLabel: {
-    color: "#fff",
-    fontSize: 12,
-    marginTop: 5,
-    fontWeight: "500",
   },
   captureButton: {
     width: 70,
@@ -619,21 +523,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     paddingHorizontal: 20,
-    paddingBottom: 30,
+    paddingBottom: 20,
     backgroundColor: "transparent",
-    gap: 15,
   },
   retakeButton: {
     flex: 1,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
     paddingVertical: 15,
+    marginRight: 10,
     backgroundColor: "#fff",
     borderRadius: 10,
     borderWidth: 1,
     borderColor: "#4ade80",
-    gap: 8,
+    alignItems: "center",
   },
   retakeText: {
     color: "#4ade80",
@@ -641,21 +542,95 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   analyzeButton: {
-    flex: 2,
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
+    flex: 1,
     paddingVertical: 15,
+    marginLeft: 10,
     backgroundColor: "#4ade80",
     borderRadius: 10,
-    gap: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  analyzeButtonDisabled: {
-    backgroundColor: "#86efac",
+  analyzingButton: {
+    backgroundColor: "#8bc34a",
   },
   analyzeText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+  disabledText: {
+    color: "#ccc",
+  },
+  detailedResults: {
+    padding: 20,
+    backgroundColor: "rgba(255, 255, 255, 0.9)",
+    margin: 20,
+    borderRadius: 15,
+    marginTop: 0,
+  },
+  resultsTitle: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#2d5016",
+    marginBottom: 15,
+    textAlign: "center",
+  },
+  predictionsList: {
+    marginBottom: 15,
+  },
+  predictionItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    backgroundColor: "#f8f9fa",
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  topPrediction: {
+    backgroundColor: "#e8f5e8",
+    borderLeftWidth: 4,
+    borderLeftColor: "#4ade80",
+  },
+  predictionName: {
+    fontSize: 16,
+    color: "#333",
+    flex: 1,
+  },
+  predictionConfidence: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#2d5016",
+  },
+  recommendationCard: {
+    backgroundColor: "#e3f2fd",
+    padding: 15,
+    borderRadius: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: "#2196f3",
+  },
+  recommendationTitle: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#1976d2",
+    marginBottom: 5,
+  },
+  recommendationText: {
+    fontSize: 14,
+    color: "#555",
+    lineHeight: 20,
+  },
+  configHint: {
+    padding: 10,
+    backgroundColor: "rgba(255, 255, 255, 0.8)",
+    marginHorizontal: 20,
+    borderRadius: 8,
+    marginBottom: 10,
+  },
+  configHintText: {
+    fontSize: 12,
+    color: "#666",
+    textAlign: "center",
   },
 });
