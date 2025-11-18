@@ -3,7 +3,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,16 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Define the type for recent image entries
+interface RecentImage {
+  id: string;
+  uri: string;
+  timestamp: number;
+  disease?: string;
+  confidence?: number;
+}
 
 export default function HomeScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -24,13 +34,47 @@ export default function HomeScreen() {
   const cameraRef = useRef<CameraView>(null);
   const router = useRouter();
 
-  const API_URL = "http://192.168.1.97:8000/predict"; // ← CHANGE THIS to your computer's IP
+  const API_URL = "https://mango-disease-backend-zfy8.onrender.com/predict";
+  const RECENT_IMAGES_KEY = '@recent_images';
+  const MAX_RECENT_IMAGES = 20; // Maximum number of recent images to store
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (Platform.OS !== "web") {
       requestPermission();
     }
   }, []);
+
+  // Function to save image to recent list
+  const saveToRecent = async (imageUri: string, disease?: string, confidence?: number) => {
+    try {
+      // Get existing recent images
+      const existingData = await AsyncStorage.getItem(RECENT_IMAGES_KEY);
+      let recentImages: RecentImage[] = existingData ? JSON.parse(existingData) : [];
+
+      // Create new entry
+      const newEntry: RecentImage = {
+        id: Date.now().toString(),
+        uri: imageUri,
+        timestamp: Date.now(),
+        disease,
+        confidence,
+      };
+
+      // Add to beginning of array
+      recentImages.unshift(newEntry);
+
+      // Keep only the most recent MAX_RECENT_IMAGES
+      if (recentImages.length > MAX_RECENT_IMAGES) {
+        recentImages = recentImages.slice(0, MAX_RECENT_IMAGES);
+      }
+
+      // Save back to storage
+      await AsyncStorage.setItem(RECENT_IMAGES_KEY, JSON.stringify(recentImages));
+      console.log('Image saved to recent:', newEntry);
+    } catch (error) {
+      console.error('Error saving to recent:', error);
+    }
+  };
 
   const handleUploadImage = async () => {
     try {
@@ -42,8 +86,12 @@ export default function HomeScreen() {
       });
 
       if (!result.canceled) {
-        setCapturedImage(result.assets[0].uri);
-        setAnalysisResult(null); // Clear previous results
+        const imageUri = result.assets[0].uri;
+        setCapturedImage(imageUri);
+        setAnalysisResult(null);
+        
+        // Save to recent immediately when image is selected
+        await saveToRecent(imageUri);
       }
     } catch (error) {
       Alert.alert("Error", "Failed to pick image");
@@ -64,7 +112,10 @@ export default function HomeScreen() {
         const photo = await cameraRef.current.takePictureAsync();
         if (photo) {
           setCapturedImage(photo.uri);
-          setAnalysisResult(null); 
+          setAnalysisResult(null);
+          
+          // Save to recent immediately when photo is captured
+          await saveToRecent(photo.uri);
         }
       }
     } catch (error) {
@@ -101,6 +152,9 @@ export default function HomeScreen() {
       if (result.success) {
         setAnalysisResult(result);
         console.log("Analysis successful:", result);
+
+        // Update the recent entry with analysis results
+        await saveToRecent(capturedImage, result.disease, result.confidence);
 
         router.push({
           pathname: "/(tabs)/prscptn_tab",
@@ -293,7 +347,7 @@ export default function HomeScreen() {
 
           <View style={styles.predictionsList}>
             {Object.entries(analysisResult.all_predictions)
-              .sort(([, a], [, b]) => b - a)
+              .sort(([, a], [, b]) => (b as number) - (a as number))
               .slice(0, 3)
               .map(([disease, confidence], index) => (
                 <View
@@ -307,7 +361,7 @@ export default function HomeScreen() {
                     {index + 1}. {disease}
                   </Text>
                   <Text style={styles.predictionConfidence}>
-                    {(confidence * 100).toFixed(1)}%
+                    {((confidence as number) * 100).toFixed(1)}%
                   </Text>
                 </View>
               ))}
@@ -598,17 +652,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#555",
     lineHeight: 20,
-  },
-  configHint: {
-    padding: 10,
-    backgroundColor: "rgba(255, 255, 255, 0.8)",
-    marginHorizontal: 20,
-    borderRadius: 8,
-    marginBottom: 10,
-  },
-  configHintText: {
-    fontSize: 12,
-    color: "#666",
-    textAlign: "center",
   },
 });
